@@ -111,6 +111,14 @@ class FakeSensor:
         return {"filament_detected": self.detected, "enabled": True}
 
 
+class FakeSpoolmanSlots:
+    def __init__(self, slots):
+        self.slots = dict(slots)
+
+    def get_status(self, eventtime):
+        return {"slots": dict(self.slots)}
+
+
 class FakeSaveVariables:
     def __init__(self):
         self.allVariables = {}
@@ -394,6 +402,9 @@ class SpoolmanTest(unittest.TestCase):
         self.link._poll(tick(self.printer))
         self.printer.ifs.materials["slots"]["1"]["color"] = "#000000"
         self.link._poll(tick(self.printer))
+        self.assertEqual(self.printer.reactor.callbacks, [])
+        self.printer.reactor.now += afc.SPOOLMAN_CHANGE_GRACE
+        self.link._poll(self.printer.reactor.now)
         self.assertEqual(len(self.printer.reactor.callbacks), 1)
         self.printer.reactor.callbacks[0](0)
         self.assertIn("kiln_afclite_spool_e0 VALUE=0", self.printer.gcode.scripts[-1])
@@ -405,6 +416,53 @@ class SpoolmanTest(unittest.TestCase):
         self.printer.ifs.materials["slots"]["2"].update(type="PLA", color="#111111")
         self.link._poll(tick(self.printer))
         self.assertEqual(self.printer.reactor.callbacks, [])
+
+    def use_kiln_spoolman(self, slots):
+        kiln = FakeSpoolmanSlots(slots)
+        self.printer.objects["spoolman_slots"] = kiln
+        self.printer.objects["AFC"].state.handle_connect()
+        self.link._handle_ready()
+        return kiln
+
+    def test_kiln_spoolman_slot_in_lane_status(self):
+        self.use_kiln_spoolman({"1": None, "2": 20, "3": None, "4": None})
+        st = self.printer.objects["AFC_lane E1"].get_status(tick(self.printer))
+        self.assertEqual(st["spool_id"], 20)
+        st = self.printer.objects["AFC_lane E0"].get_status(tick(self.printer))
+        self.assertIsNone(st["spool_id"])
+
+    def test_nfc_scan_keeps_new_spool(self):
+        kiln = self.use_kiln_spoolman({"2": 5})
+        self.link._poll(tick(self.printer))
+        # KILN_NFC: IFS_SET_MATERIAL, then SPOOLMAN_SET_SLOT, between polls.
+        self.printer.ifs.materials["slots"]["2"]["color"] = "#FFC0CB"
+        kiln.slots["2"] = 20
+        self.link._poll(tick(self.printer))
+        self.printer.reactor.now += afc.SPOOLMAN_CHANGE_GRACE
+        self.link._poll(self.printer.reactor.now)
+        self.assertEqual(self.printer.reactor.callbacks, [])
+
+    def test_nfc_scan_spool_after_material_poll(self):
+        kiln = self.use_kiln_spoolman({"2": 5})
+        self.link._poll(tick(self.printer))
+        self.printer.ifs.materials["slots"]["2"]["color"] = "#FFC0CB"
+        self.link._poll(tick(self.printer))
+        kiln.slots["2"] = 20
+        self.link._poll(tick(self.printer))
+        self.printer.reactor.now += afc.SPOOLMAN_CHANGE_GRACE
+        self.link._poll(self.printer.reactor.now)
+        self.assertEqual(self.printer.reactor.callbacks, [])
+
+    def test_kiln_spoolman_cleared_on_change(self):
+        self.use_kiln_spoolman({"2": 5})
+        self.link._poll(tick(self.printer))
+        self.printer.ifs.materials["slots"]["2"]["color"] = "#000000"
+        self.link._poll(tick(self.printer))
+        self.printer.reactor.now += afc.SPOOLMAN_CHANGE_GRACE
+        self.link._poll(self.printer.reactor.now)
+        self.assertEqual(len(self.printer.reactor.callbacks), 1)
+        self.printer.reactor.callbacks[0](0)
+        self.assertIn("SPOOLMAN_SET_SLOT SLOT=2 SPOOL=", self.printer.gcode.scripts[-1])
 
     def test_clear_on_removed(self):
         self.printer.save_variables.allVariables["kiln_afclite_spool_e0"] = 7

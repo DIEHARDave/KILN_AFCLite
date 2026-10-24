@@ -46,6 +46,10 @@ SPOOLMAN_CLEAR_DELAY = 30.0
 # After SET_SPOOL_ID writes a spool's color and material into a slot, changes
 # to that slot are its own for this long, not a different filament.
 SPOOLMAN_APPLY_GRACE = 10.0
+# A slot's color or material changed by another plugin is only taken as a
+# different filament if no new spool is assigned to the slot within this long
+# (KILN_NFC sets the material, then SPOOLMAN_SET_SLOT).
+SPOOLMAN_CHANGE_GRACE = 5.0
 CARD_UIDS_FIELD = "card_uids"
 CARD_UIDS_FIELD_DEFINITION = {
     "name": "Card UIDs",
@@ -104,6 +108,7 @@ class KilnState:
         self.ifs = None
         self.head_sensor = None
         self.save_variables = None
+        self.spoolman_slots = None
         self.default_weight = 0.
         self._eventtime = None
         self._snapshot = None
@@ -118,6 +123,9 @@ class KilnState:
         self.head_sensor = self.printer.lookup_object(self.head_sensor_name, None)
         # Lane weights and spool IDs are kept in save_variables.
         self.save_variables = self.printer.lookup_object("save_variables", None)
+        # With Kiln's spoolman plugin loaded, its slot spools are the lane
+        # spools, so assignments made by other plugins (KILN_NFC) show too.
+        self.spoolman_slots = self.printer.lookup_object(SPOOLMAN_SLOTS_OBJECT, None)
 
     def get(self, eventtime):
         if self.ifs is None:
@@ -146,6 +154,7 @@ class KilnState:
             "slots": {},
             "mapping": {},
             "variables": {},
+            "slot_spools": None,
         }
 
     def _read(self, eventtime):
@@ -179,6 +188,15 @@ class KilnState:
                 mapping.setdefault(int(slot), f"T{int(tool)}")
             except (TypeError, ValueError):
                 continue
+        slot_spools = None
+        if self.spoolman_slots is not None:
+            slot_spools = {}
+            raw = (self.spoolman_slots.get_status(eventtime) or {}).get("slots") or {}
+            for slot, spool_id in raw.items():
+                try:
+                    slot_spools[int(slot)] = int(spool_id) if spool_id else None
+                except (TypeError, ValueError):
+                    continue
         return {
             "connected": connected,
             "busy": bool(ifs.get("busy")),
@@ -191,6 +209,7 @@ class KilnState:
             "slots": slots,
             "mapping": mapping,
             "variables": dict(getattr(self.save_variables, "allVariables", None) or {}),
+            "slot_spools": slot_spools,
         }
 
 
@@ -267,6 +286,9 @@ class SpoolmanLink:
         # slot come from this plugin's own SET_SPOOL_ID.
         self._filament = {}
         self._applying = {}
+        # Slots whose filament changed: (when to clear, spool at the change).
+        self._changed = {}
+        self._spools = {}
         self._timer = None
         self.gcode.register_command(
             "SET_SPOOL_ID", self.cmd_SET_SPOOL_ID,
@@ -516,22 +538,35 @@ class SpoolmanLink:
         """Forget a lane's spool once its color or material is changed outside
         this plugin (the touch screen, IFS_SET_MATERIAL, an NFC tag): that is
         a different filament, and Mainsail and Fluidd would otherwise keep
-        showing the spool's name and material from Spoolman."""
+        showing the spool's name and material from Spoolman. A spool assigned
+        along with the change (an NFC scan) is kept."""
         for slot, material in snapshot["slots"].items():
+            lane = self.lanes.get(f"E{slot - 1}")
+            spool_id = lane.spool_id(snapshot) if lane is not None else None
             current = (
                 str(material.get("color") or "").upper(),
                 str(material.get("type") or "").upper(),
             )
             previous = self._filament.get(slot)
             self._filament[slot] = current
+            previous_spool = self._spools.get(slot)
+            self._spools[slot] = spool_id
+            pending = self._changed.get(slot)
+            if pending is not None:
+                if spool_id != pending[1]:
+                    # A spool came with the filament (an NFC scan).
+                    self._changed.pop(slot)
+                elif eventtime >= pending[0]:
+                    self._changed.pop(slot)
+                    if spool_id:
+                        self._clear_spool(lane, "filament changed outside the AFC panel")
             if eventtime < self._applying.get(slot, 0.):
                 continue
             self._applying.pop(slot, None)
-            if previous is None or previous == current:
+            if previous is None or previous == current or lane is None:
                 continue
-            lane = self.lanes.get(f"E{slot - 1}")
-            if lane is not None and lane.spool_id(snapshot):
-                self._clear_spool(lane, "filament changed outside the AFC panel")
+            if spool_id and spool_id == previous_spool and slot not in self._changed:
+                self._changed[slot] = (eventtime + SPOOLMAN_CHANGE_GRACE, spool_id)
 
     def _clear_removed(self, snapshot, eventtime):
         """Forget a lane's spool once its filament has been taken out of the
@@ -742,7 +777,10 @@ class AFCLane:
             return round(self.state.default_weight)
 
     def spool_id(self, state):
-        """Spoolman spool ID saved by SET_SPOOL_ID, or None."""
+        """The slot's spool in Kiln's spoolman plugin when it is loaded, else
+        the Spoolman spool ID saved by SET_SPOOL_ID, or None."""
+        if state.get("slot_spools") is not None:
+            return state["slot_spools"].get(self.slot)
         saved = state["variables"].get(f"{SPOOL_VARIABLE_PREFIX}{self.name.lower()}")
         try:
             spool_id = int(saved)
