@@ -48,7 +48,7 @@ SPOOLMAN_CLEAR_DELAY = 30.0
 SPOOLMAN_APPLY_GRACE = 10.0
 # A slot's color or material changed by another plugin is only taken as a
 # different filament if no new spool is assigned to the slot within this long
-# (KILN_NFC sets the material, then SPOOLMAN_SET_SLOT).
+# (FF_NFC sets the material, then SPOOLMAN_SET_SLOT).
 SPOOLMAN_CHANGE_GRACE = 5.0
 CARD_UIDS_FIELD = "card_uids"
 CARD_UIDS_FIELD_DEFINITION = {
@@ -124,7 +124,7 @@ class KilnState:
         # Lane weights and spool IDs are kept in save_variables.
         self.save_variables = self.printer.lookup_object("save_variables", None)
         # With Kiln's spoolman plugin loaded, its slot spools are the lane
-        # spools, so assignments made by other plugins (KILN_NFC) show too.
+        # spools, so assignments made by other plugins (FF_NFC) show too.
         self.spoolman_slots = self.printer.lookup_object(SPOOLMAN_SLOTS_OBJECT, None)
 
     def get(self, eventtime):

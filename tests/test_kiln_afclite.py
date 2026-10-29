@@ -434,7 +434,7 @@ class SpoolmanTest(unittest.TestCase):
     def test_nfc_scan_keeps_new_spool(self):
         kiln = self.use_kiln_spoolman({"2": 5})
         self.link._poll(tick(self.printer))
-        # KILN_NFC: IFS_SET_MATERIAL, then SPOOLMAN_SET_SLOT, between polls.
+        # FF_NFC: IFS_SET_MATERIAL, then SPOOLMAN_SET_SLOT, between polls.
         self.printer.ifs.materials["slots"]["2"]["color"] = "#FFC0CB"
         kiln.slots["2"] = 20
         self.link._poll(tick(self.printer))
