@@ -1,5 +1,7 @@
 # Kiln AFC Lite
 
+> **Parts:** the printers, boards, readers and other gear that go with this project are listed at [projects.die-hard.net/gear](https://projects.die-hard.net/gear) (Amazon affiliate links).
+
 An AFC-compatible status and control adapter for the four-slot IFS of the
 Flashforge AD5X on [Kiln OS](https://github.com/djvalic/kiln-os).
 
