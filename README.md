@@ -1,5 +1,15 @@
 # Kiln AFC Lite
 
+> **Archived: replaced by [KILN_AFC](https://github.com/DIEHARDave/KILN_AFC)**,
+> the full ArmoredTurtle AFC on Kiln OS with the IFS as an AFC unit
+> (mid-print tool changes, runout lanes, the AFC panels). This repository
+> gets no more updates.
+>
+> To switch, install KILN_AFC and run `ENABLE_PLUGIN NAME=afc`. When it
+> starts, it disables and deletes afclite by itself and keeps your lane
+> spools ([how](https://github.com/DIEHARDave/KILN_AFC#coming-from-afclite)).
+> Then restart HelixScreen once, so it picks up the new lane names.
+
 > **Parts:** the printers, boards, readers and other gear that go with this project are listed at [projects.die-hard.net/gear](https://projects.die-hard.net/gear) (Amazon affiliate links).
 
 An AFC-compatible status and control adapter for the four-slot IFS of the
